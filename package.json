@@ -1,17 +1,15 @@
 {
   "name": "math-quiz-dashboard",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Notion 문제집 기록 → Firebase → GitHub Pages 시각화 대시보드",
+  "description": "Notion 문제집 기록 → data.json → GitHub Pages 시각화 대시보드",
   "scripts": {
     "sync": "node scripts/sync.js",
     "sync:dry": "node scripts/sync.js --dry",
     "dev": "npx --yes serve ."
   },
   "dependencies": {
-    "@notionhq/client": "^2.2.15",
-    "firebase-admin": "^12.1.1"
+    "@notionhq/client": "^2.2.15"
   }
 }
-

@@ -264,7 +264,7 @@ footer { padding: 46px 0 64px; color: var(--ink-muted); font-size: .8rem; border
 <div class="hero wrap">
   <div class="pill reveal"><span class="dot" id="connDot"></span><span id="connText">연결 확인 중…</span></div>
   <h1 class="reveal d1">풀수록 쌓이는<br>나의 <span style="color:var(--series-1)">학습 데이터</span></h1>
-  <p class="reveal d2">Notion에서 문제집을 풀고 점수를 적으면, 1시간마다 Firebase로 자동 업로드되어
+  <p class="reveal d2">Notion에서 문제집을 풀고 점수를 적으면, 1시간마다 GitHub Actions가 읽어 가
      아래 차트에 기록됩니다. 날짜·주제·난이도·평균이 한눈에 보입니다.</p>
 </div>
 
@@ -334,7 +334,7 @@ footer { padding: 46px 0 64px; color: var(--ink-muted); font-size: .8rem; border
 </main>
 
 <footer class="wrap">
-  <div id="footNote">Notion → GitHub Actions(1시간마다) → Firebase Firestore → GitHub Pages</div>
+  <div id="footNote">Notion → GitHub Actions(1시간마다) → data.json → GitHub Pages</div>
 </footer>
 
 <script src="./config.js"></script>
@@ -417,31 +417,39 @@ const DEMO = [
 
 const tierOf = (s) => (CFG.tiers.find(t => s >= t.min) || CFG.tiers.at(-1)).key;
 
+const fmtWhen = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const mins = Math.round((Date.now() - d) / 60000);
+  if (mins < 1)  return "방금 전";
+  if (mins < 60) return `${mins}분 전`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24)  return `${hrs}시간 전`;
+  return `${Math.round(hrs / 24)}일 전`;
+};
+
 async function load() {
-  const fb = CFG.firebase;
-  if (!fb || !fb.projectId) {
-    $("connDot").classList.add("off");
-    $("connText").textContent = "데모 데이터 — config.js 에 Firebase 설정을 넣으면 실제 기록이 표시됩니다";
-    $("brandSub").textContent = "데모 모드";
-    return DEMO;
-  }
+  const url = CFG.dataUrl || "./data.json";
   try {
-    // Firebase SDK 는 설정이 있을 때만 불러옵니다 (데모 모드는 네트워크 없이 동작)
-    const [{ initializeApp }, { getFirestore, collection, getDocs, query, orderBy }] = await Promise.all([
-      import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"),
-      import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js")
-    ]);
-    const db = getFirestore(initializeApp(fb));
-    const snap = await getDocs(query(collection(db, "quizzes"), orderBy("dateTs", "asc")));
-    const rows = snap.docs.map(d => d.data()).filter(r => typeof r.score === "number");
-    if (!rows.length) throw new Error("빈 컬렉션");
-    $("connText").textContent = `Firebase 연결됨 · ${rows.length}건`;
-    $("brandSub").textContent = "실시간";
+    // GitHub Actions 가 Notion 을 읽어 만들어 둔 정적 JSON 을 그대로 사용합니다.
+    const res = await fetch(`${url}?t=${Date.now()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const json = await res.json();
+    const rows = (Array.isArray(json) ? json : json.rows || [])
+      .filter(r => typeof r.score === "number" && r.date)
+      .sort((a, b) => (a.dateTs || Date.parse(a.date)) - (b.dateTs || Date.parse(b.date)));
+    if (!rows.length) throw new Error("빈 데이터");
+
+    const when = json.summary?.updatedAt ? ` · ${fmtWhen(json.summary.updatedAt)} 갱신` : "";
+    $("connText").textContent = `Notion 연결됨 · ${rows.length}건${when}`;
+    $("brandSub").textContent = "Notion 동기화";
     return rows;
   } catch (err) {
-    console.warn("[dashboard] Firestore 로드 실패, 데모로 대체:", err);
+    console.warn("[dashboard] data.json 로드 실패, 데모로 대체:", err);
     $("connDot").classList.add("off");
-    $("connText").textContent = "Firebase 연결 실패 — 데모 데이터를 표시합니다 (콘솔 확인)";
+    $("connText").textContent = "데모 데이터 — GitHub Actions 동기화가 아직 실행되지 않았습니다 (Actions 탭에서 sync 실행)";
+    $("brandSub").textContent = "데모 모드";
     return DEMO;
   }
 }

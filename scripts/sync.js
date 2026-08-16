@@ -1,19 +1,22 @@
 /**
- * Notion → Firebase Firestore 동기화
- * GitHub Actions 가 1시간마다 실행합니다.
+ * Notion → data.json 생성
+ * GitHub Actions 가 1시간마다 실행하고, 바뀐 게 있으면 저장소에 커밋합니다.
+ * 대시보드(index.html)는 이 data.json 하나만 fetch 합니다. (Firebase 불필요)
  *
  * 필요한 환경변수 (GitHub Secrets):
- *   NOTION_TOKEN              ntn_... (Notion Internal Integration Secret)
- *   NOTION_DATABASE_ID        32자리 DB ID
- *   FIREBASE_SERVICE_ACCOUNT  서비스 계정 JSON 전체 문자열
+ *   NOTION_TOKEN        ntn_... (Notion Internal Integration Secret)
+ *   NOTION_DATABASE_ID  32자리 DB ID
  *
  * 로컬 테스트:  node scripts/sync.js --dry
  */
 
 import { Client } from "@notionhq/client";
-import admin from "firebase-admin";
+import { writeFile, mkdir } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const DRY = process.argv.includes("--dry");
+const OUT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "data.json");
 
 const TIERS = [
   { key: "최상", min: 90 },
@@ -93,7 +96,7 @@ function withAverages(rows) {
   });
 }
 
-/* ── 3. 집계(stats/summary) ─────────────────────────── */
+/* ── 3. 집계(summary) ───────────────────────────────── */
 function buildSummary(rows) {
   const avgBy = (key) => {
     const m = new Map();
@@ -114,41 +117,11 @@ function buildSummary(rows) {
     lowest: pick(lo),
     byTopic: avgBy("topic"),
     byDifficulty: avgBy("difficulty"),
-    updatedAt: Date.now()
+    updatedAt: new Date().toISOString()
   };
 }
 
-/* ── 4. Firestore 쓰기 ──────────────────────────────── */
-async function push(rows, summary) {
-  admin.initializeApp({
-    credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT))
-  });
-  const db = admin.firestore();
-
-  // 500개 단위 배치 (Firestore 제한)
-  for (let i = 0; i < rows.length; i += 400) {
-    const batch = db.batch();
-    for (const r of rows.slice(i, i + 400)) {
-      batch.set(db.collection("quizzes").doc(r.notionId), { ...r, syncedAt: Date.now() }, { merge: true });
-    }
-    await batch.commit();
-  }
-  await db.collection("stats").doc("summary").set(summary);
-
-  // Notion 에서 지워진 행은 Firestore 에서도 정리
-  const live = new Set(rows.map((r) => r.notionId));
-  const snap = await db.collection("quizzes").get();
-  const stale = snap.docs.filter((d) => !live.has(d.id));
-  if (stale.length) {
-    const batch = db.batch();
-    stale.forEach((d) => batch.delete(d.ref));
-    await batch.commit();
-    console.log(`🧹 삭제된 행 ${stale.length}건 정리`);
-  }
-}
-
-/* ── 5. 계산된 평균을 Notion 에 되돌려 쓰기 (선택) ─────────
- */
+/* ── 4. 계산된 평균을 Notion 에 되돌려 쓰기 (선택) ───────── */
 async function writeBackAverages(rows) {
   const notion = new Client({ auth: process.env.NOTION_TOKEN });
   for (const r of rows) {
@@ -165,10 +138,10 @@ async function writeBackAverages(rows) {
 }
 
 (async () => {
-  console.log("📥 Notion 읽기 중･");
+  console.log("📥 Notion 읽기 중…");
   const raw = await fetchNotion();
   if (!raw.length) {
-    console.log("⚠️  점수가 입력된 행이 없습니다. 종퉌합니다.");
+    console.log("⚠️  점수가 입력된 행이 없습니다. 종료합니다.");
     return;
   }
   const rows = withAverages(raw);
@@ -178,18 +151,21 @@ async function writeBackAverages(rows) {
   console.log(`   최고 ${summary.highest.score}점 (${summary.highest.title})`);
   console.log(`   최저 ${summary.lowest.score}점 (${summary.lowest.title})`);
 
+  const payload = { version: 1, source: "notion", summary, rows };
+
   if (DRY) {
-    console.log("\n--dry 모드: Firestore 에 쓰지 않습니다.\n");
+    console.log("\n--dry 모드: 파일을 쓰지 않습니다.\n");
     console.log(JSON.stringify({ sample: rows.at(-1), summary }, null, 2));
     return;
   }
 
-  console.log("📤 Firestore 업로드 중･");
-  await push(rows, summary);
+  await mkdir(dirname(OUT), { recursive: true });
+  await writeFile(OUT, JSON.stringify(payload, null, 2) + "\n", "utf8");
+  console.log(`📝 data.json 저장 완료 (${rows.length}건)`);
+
   await writeBackAverages(rows);
   console.log("🎉 동기화 완료");
 })().catch((e) => {
   console.error("❌ 동기화 실패:", e);
   process.exit(1);
 });
-

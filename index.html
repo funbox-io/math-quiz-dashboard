@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>수학 문제집 대시보드</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
+<style>
+/* ============================================================
+   1. 팔레트 — 검증된 기본 팔레트 (dataviz 레퍼런스)
+   ============================================================ */
+:root {
+  color-scheme: light;
+  --surface-1:  #fcfcfb;   /* 차트 표면 */
+  --plane:      #f9f9f7;   /* 페이지 바닥 */
+  --ink-1:      #0b0b0b;
+  --ink-2:      #52514e;
+  --ink-muted:  #898781;
+  --grid:       #e1e0d9;
+  --axis:       #c3c2b7;
+  --border:     rgba(11,11,11,0.10);
+  --series-1:   #2a78d6;   /* 점수 */
+  --series-2:   #eb6834;   /* 누적 평균 */
+  --good:       #0ca30c;
+  --critical:   #d03b3b;
+  /* 점수 구간 = 순서형 램프 (밝음 → 어두움) */
+  --tier-하:    #86b6ef;
+  --tier-중:    #3987e5;
+  --tier-상:    #256abf;
+  --tier-최상:  #104281;
+  --shadow: 0 1px 2px rgba(11,11,11,.04), 0 8px 24px rgba(11,11,11,.06);
+  --glow: 42,120,214;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1:  #1a1a19;
+  --plane:      #0d0d0d;
+  --ink-1:      #ffffff;
+  --ink-2:      #c3c2b7;
+  --ink-muted:  #898781;
+  --grid:       #2c2c2a;
+  --axis:       #383835;
+  --border:     rgba(255,255,255,0.10);
+  --series-1:   #3987e5;
+  --series-2:   #d95926;
+  --good:       #0ca30c;
+  --critical:   #d03b3b;
+  --tier-하:    #184f95;
+  --tier-중:    #256abf;
+  --tier-상:    #3987e5;
+  --tier-최상:  #9ec5f4;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 32px rgba(0,0,0,.5);
+  --glow: 57,135,229;
+}
+
+/* ============================================================
+   2. 기본 레이아웃
+   ============================================================ */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--plane);
+  color: var(--ink-1);
+  font-family: system-ui, -apple-system, "Segoe UI", "Apple SD Gothic Neo",
+               "Malgun Gothic", sans-serif;
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+
+/* ── 마우스 스포트라이트 (배경 글로우) ── */
+#spotlight {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: radial-gradient(
+    600px circle at var(--mx, 50%) var(--my, 50%),
+    rgba(var(--glow), .13), transparent 65%);
+  transition: background .18s ease-out;
+}
+/* ── 커스텀 커서 ── */
+#cursor-dot, #cursor-ring {
+  position: fixed; top: 0; left: 0; pointer-events: none; z-index: 9999;
+  border-radius: 50%; transform: translate(-50%,-50%);
+}
+#cursor-dot  { width: 6px; height: 6px; background: var(--series-1); }
+#cursor-ring {
+  width: 34px; height: 34px; border: 1.5px solid var(--series-1);
+  opacity: .55; transition: width .18s, height .18s, opacity .18s, border-color .18s;
+}
+#cursor-ring.is-hot { width: 58px; height: 58px; opacity: .9; }
+@media (hover: none), (pointer: coarse) {
+  #cursor-dot, #cursor-ring { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #cursor-dot, #cursor-ring, #spotlight { display: none; }
+  html { scroll-behavior: auto; }
+}
+
+/* ── 스크롤 리빌 ── */
+.reveal {
+  opacity: 0; transform: translateY(28px);
+  transition: opacity .7s cubic-bezier(.2,.7,.2,1), transform .7s cubic-bezier(.2,.7,.2,1);
+}
+.reveal.in { opacity: 1; transform: none; }
+.reveal.d1 { transition-delay: .07s; }
+.reveal.d2 { transition-delay: .14s; }
+.reveal.d3 { transition-delay: .21s; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; transition: none; }
+}
+/* 스크롤 진행 바 */
+#progress {
+  position: fixed; top: 0; left: 0; height: 3px; width: 0%;
+  background: var(--series-1); z-index: 100; transition: width .1s linear;
+}
+
+/* ── 헤더 / 히어로 ── */
+header.bar {
+  position: sticky; top: 0; z-index: 50;
+  backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--plane) 82%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+header.bar .wrap {
+  display: flex; align-items: center; gap: 16px; height: 60px;
+}
+.brand { font-weight: 700; letter-spacing: -.01em; margin-right: auto; }
+.brand span { color: var(--ink-muted); font-weight: 500; font-size: .82rem; margin-left: 8px; }
+.btn {
+  font: inherit; font-size: .85rem; padding: 7px 14px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-1);
+  color: var(--ink-1); cursor: pointer; text-decoration: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  transition: transform .15s, border-color .15s, background .15s;
+}
+.btn:hover { transform: translateY(-1px); border-color: var(--series-1); }
+.btn.primary { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+
+.hero { padding: 84px 0 40px; position: relative; z-index: 1; }
+.hero h1 {
+  font-size: clamp(2rem, 5.4vw, 3.4rem); line-height: 1.14;
+  letter-spacing: -.03em; margin: 0 0 14px; font-weight: 750;
+}
+.hero p { color: var(--ink-2); max-width: 56ch; margin: 0 0 26px; }
+.pill {
+  display: inline-flex; align-items: center; gap: 7px; font-size: .78rem;
+  padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border);
+  color: var(--ink-2); background: var(--surface-1); margin-bottom: 20px;
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--good); }
+.dot.off { background: var(--ink-muted); }
+
+/* ── 카드 / 그리드 ── */
+section { padding: 34px 0; position: relative; z-index: 1; }
+h2.sec {
+  font-size: 1.02rem; font-weight: 650; letter-spacing: -.01em;
+  margin: 0 0 4px; display: flex; align-items: baseline; gap: 10px;
+}
+h2.sec small { font-weight: 450; color: var(--ink-muted); font-size: .8rem; }
+.grid { display: grid; gap: 16px; }
+.g4 { grid-template-columns: repeat(4, 1fr); }
+.g2 { grid-template-columns: 1.55fr 1fr; }
+@media (max-width: 900px) { .g4 { grid-template-columns: repeat(2,1fr); } .g2 { grid-template-columns: 1fr; } }
+@media (max-width: 540px) { .g4 { grid-template-columns: 1fr; } }
+
+.card {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 16px; padding: 20px; box-shadow: var(--shadow);
+  transition: transform .18s cubic-bezier(.2,.7,.2,1), border-color .18s;
+  will-change: transform;
+}
+.card.tilt:hover { border-color: color-mix(in srgb, var(--series-1) 45%, var(--border)); }
+
+/* ── 스탯 타일 ── */
+.stat .k { font-size: .78rem; color: var(--ink-muted); margin-bottom: 6px; }
+.stat .v { font-size: 2.1rem; font-weight: 700; letter-spacing: -.03em; line-height: 1.1; }
+.stat .u { font-size: .95rem; font-weight: 500; color: var(--ink-muted); margin-left: 2px; }
+.stat .d { font-size: .78rem; color: var(--ink-2); margin-top: 6px; }
+.up { color: var(--good); } .down { color: var(--critical); }
+
+/* ── 차트 ── */
+.chartbox { position: relative; height: 300px; }
+.chartbox.sm { height: 260px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin: 12px 0 2px; font-size: .8rem; color: var(--ink-2); }
+.legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; margin-right: 6px; vertical-align: -1px; }
+
+/* ── 최고/최저 아이콘 버튼 ── */
+.iconrow { display: flex; gap: 10px; flex-wrap: wrap; }
+.iconbtn {
+  flex: 1 1 0; min-width: 132px; font: inherit; cursor: pointer; text-align: left;
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 14px; padding: 14px 16px; color: var(--ink-1);
+  display: flex; align-items: center; gap: 12px;
+  transition: transform .16s, border-color .16s, background .16s;
+}
+.iconbtn:hover { transform: translateY(-2px); }
+.iconbtn[aria-pressed="true"] { border-color: var(--series-1); background: color-mix(in srgb, var(--series-1) 10%, var(--surface-1)); }
+.iconbtn .ico { font-size: 1.35rem; line-height: 1; }
+.iconbtn .t { font-size: .82rem; color: var(--ink-muted); }
+.iconbtn .n { font-weight: 650; font-size: .95rem; }
+
+/* ── 문제집 리스트 ── */
+.filters { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 16px; }
+.chip {
+  font: inherit; font-size: .8rem; padding: 6px 13px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-1);
+  color: var(--ink-2); cursor: pointer; display: inline-flex; align-items: center; gap: 7px;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.chip[aria-pressed="true"] { color: var(--ink-1); border-color: var(--series-1); background: color-mix(in srgb, var(--series-1) 12%, var(--surface-1)); }
+.chip i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+ul.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+ul.list li {
+  display: grid; grid-template-columns: 5px 1fr auto; align-items: center; gap: 14px;
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 13px; padding: 13px 16px 13px 0; overflow: hidden;
+  transition: transform .15s, border-color .15s;
+}
+ul.list li:hover { transform: translateX(3px); border-color: color-mix(in srgb, var(--series-1) 45%, var(--border)); }
+ul.list li .bar { width: 5px; height: 100%; align-self: stretch; }
+ul.list li .meta { font-size: .76rem; color: var(--ink-muted); }
+ul.list li .title { font-weight: 600; font-size: .93rem; }
+ul.list li .title a { color: inherit; text-decoration: none; }
+ul.list li .title a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.score { text-align: right; padding-right: 4px; }
+.score b { font-size: 1.28rem; font-weight: 700; letter-spacing: -.02em; }
+/* 배지는 텍스트 토큰 + 색 점으로 표시 (색만으로 의미를 전달하지 않음) */
+.badge {
+  font-size: .68rem; padding: 2px 9px; border-radius: 999px;
+  color: var(--ink-2); background: var(--surface-1); border: 1px solid var(--border);
+  display: inline-flex; align-items: center; gap: 5px; font-weight: 600;
+}
+.badge i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.empty { color: var(--ink-muted); font-size: .87rem; padding: 22px; text-align: center; }
+
+/* ── 표 보기 (접근성) ── */
+table { width: 100%; border-collapse: collapse; font-size: .84rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--grid); }
+th { color: var(--ink-muted); font-weight: 550; font-size: .78rem; }
+details.tbl { margin-top: 14px; }
+details.tbl summary { cursor: pointer; font-size: .82rem; color: var(--ink-2); padding: 6px 0; }
+
+footer { padding: 46px 0 64px; color: var(--ink-muted); font-size: .8rem; border-top: 1px solid var(--border); margin-top: 40px; }
+</style>
+</head>
+<body data-palette="#2a78d6,#eb6834">
+
+<div id="progress"></div>
+<div id="spotlight"></div>
+<div id="cursor-ring"></div>
+<div id="cursor-dot"></div>
+
+<header class="bar">
+  <div class="wrap">
+    <div class="brand">📘 수학 문제집 대시보드 <span id="brandSub">데이터 마이닝</span></div>
+    <a class="btn" id="notionLink" href="#" target="_blank" rel="noopener">Notion DB ↗</a>
+    <button class="btn" id="themeBtn" aria-label="테마 전환">🌙</button>
+  </div>
+</header>
+
+<main>
+<!-- ══════════ HERO ══════════ -->
+<div class="hero wrap">
+  <div class="pill reveal"><span class="dot" id="connDot"></span><span id="connText">연결 확인 중…</span></div>
+  <h1 class="reveal d1">풀수록 쌓이는<br>나의 <span style="color:var(--series-1)">학습 데이터</span></h1>
+  <p class="reveal d2">Notion에서 문제집을 풀고 점수를 적으면, 1시간마다 Firebase로 자동 업로드되어
+     아래 차트에 기록됩니다. 날짜·주제·난이도·평균이 한눈에 보입니다.</p>
+</div>
+
+<!-- ══════════ KPI ══════════ -->
+<section class="wrap">
+  <div class="grid g4">
+    <div class="card stat tilt reveal"    ><div class="k">전체 평균</div><div class="v"><span id="kAvg">–</span><span class="u">점</span></div><div class="d" id="kAvgD">&nbsp;</div></div>
+    <div class="card stat tilt reveal d1" ><div class="k">푼 문제집</div><div class="v"><span id="kCnt">–</span><span class="u">개</span></div><div class="d" id="kCntD">&nbsp;</div></div>
+    <div class="card stat tilt reveal d2" ><div class="k">최고 점수</div><div class="v"><span id="kMax">–</span><span class="u">점</span></div><div class="d" id="kMaxD">&nbsp;</div></div>
+    <div class="card stat tilt reveal d3" ><div class="k">최근 추세</div><div class="v"><span id="kTrd">–</span></div><div class="d" id="kTrdD">&nbsp;</div></div>
+  </div>
+</section>
+
+<!-- ══════════ 점수 추이 ══════════ -->
+<section class="wrap">
+  <h2 class="sec reveal">날짜별 점수 추이 <small>업로드할 때마다 자동으로 점이 추가됩니다</small></h2>
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card tilt reveal">
+      <div class="legend">
+        <span><i style="background:var(--series-1)"></i>회차 점수</span>
+        <span><i style="background:var(--series-2)"></i>누적 평균</span>
+      </div>
+      <div class="chartbox"><canvas id="cTrend"></canvas></div>
+      <details class="tbl"><summary>표로 보기</summary><div id="tTrend"></div></details>
+    </div>
+    <div class="card tilt reveal d1">
+      <h2 class="sec" style="font-size:.9rem">난이도별 평균</h2>
+      <div class="chartbox sm"><canvas id="cDiff"></canvas></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ 주제별 ══════════ -->
+<section class="wrap">
+  <h2 class="sec reveal">주제별 평균 <small>약한 단원을 찾아내는 구간</small></h2>
+  <div class="card tilt reveal d1" style="margin-top:14px">
+    <div class="chartbox"><canvas id="cTopic"></canvas></div>
+    <details class="tbl"><summary>표로 보기</summary><div id="tTopic"></div></details>
+  </div>
+</section>
+
+<!-- ══════════ 최고 / 최저 ══════════ -->
+<section class="wrap">
+  <h2 class="sec reveal">빠르게 불러오기 <small>아이콘을 누르면 아래 목록이 바뀝니다</small></h2>
+  <div class="iconrow reveal d1" style="margin-top:14px">
+    <button class="iconbtn" id="btnHigh" aria-pressed="false">
+      <span class="ico">🏆</span><span><span class="t">가장 높은 점수</span><br><span class="n" id="nHigh">–</span></span>
+    </button>
+    <button class="iconbtn" id="btnLow" aria-pressed="false">
+      <span class="ico">🎯</span><span><span class="t">가장 낮은 점수</span><br><span class="n" id="nLow">–</span></span>
+    </button>
+    <button class="iconbtn" id="btnRecent" aria-pressed="true">
+      <span class="ico">🕒</span><span><span class="t">최신순</span><br><span class="n" id="nRecent">–</span></span>
+    </button>
+    <button class="iconbtn" id="btnWeak" aria-pressed="false">
+      <span class="ico">📉</span><span><span class="t">약한 주제</span><br><span class="n" id="nWeak">–</span></span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════ 문제집 목록 ══════════ -->
+<section class="wrap">
+  <h2 class="sec reveal">문제집 목록 <small>점수 구간별로 구분 · 제목을 누르면 Notion으로 이동</small></h2>
+  <div class="filters reveal d1" id="tierFilters"></div>
+  <ul class="list reveal d1" id="quizList"></ul>
+</section>
+</main>
+
+<footer class="wrap">
+  <div id="footNote">Notion → GitHub Actions(1시간마다) → Firebase Firestore → GitHub Pages</div>
+</footer>
+
+<script src="./config.js"></script>
+<!-- Chart.js (CDN). 오프라인/사내망이면 vendor/chart.umd.js 를 받아 src 를 바꾸세요 -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script type="module">
+const CFG = window.APP_CONFIG;
+const $ = (id) => document.getElementById(id);
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+/* ══════════════ 1. 마우스 · 스크롤 효과 ══════════════ */
+(() => {
+  const dot = $("cursor-dot"), ring = $("cursor-ring"), spot = $("spotlight");
+  let rx = 0, ry = 0, tx = 0, ty = 0;
+  addEventListener("pointermove", (e) => {
+    tx = e.clientX; ty = e.clientY;
+    dot.style.transform = `translate(${tx}px,${ty}px) translate(-50%,-50%)`;
+    spot.style.setProperty("--mx", tx + "px");
+    spot.style.setProperty("--my", ty + "px");
+  }, { passive: true });
+  (function loop() {                       // 링은 살짝 따라오게 (easing)
+    rx += (tx - rx) * .18; ry += (ty - ry) * .18;
+    ring.style.transform = `translate(${rx}px,${ry}px) translate(-50%,-50%)`;
+    requestAnimationFrame(loop);
+  })();
+  const hot = "a,button,.card,li";
+  addEventListener("pointerover", (e) => ring.classList.toggle("is-hot", !!e.target.closest(hot)), { passive: true });
+
+  // 스크롤 진행 바
+  addEventListener("scroll", () => {
+    const h = document.documentElement;
+    $("progress").style.width = (h.scrollTop / (h.scrollHeight - h.clientHeight) * 100) + "%";
+  }, { passive: true });
+
+  // 스크롤 리빌
+  const io = new IntersectionObserver((es) => es.forEach(e => {
+    if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+  }), { threshold: .12, rootMargin: "0px 0px -40px" });
+  document.querySelectorAll(".reveal").forEach(el => io.observe(el));
+
+  // 카드 3D 틸트
+  document.querySelectorAll(".card.tilt").forEach(card => {
+    card.addEventListener("pointermove", (e) => {
+      const r = card.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width - .5, py = (e.clientY - r.top) / r.height - .5;
+      card.style.transform = `perspective(900px) rotateX(${-py*3.2}deg) rotateY(${px*3.2}deg) translateY(-3px)`;
+    });
+    card.addEventListener("pointerleave", () => card.style.transform = "");
+  });
+})();
+
+/* 테마 토글 */
+$("themeBtn").onclick = () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+  $("themeBtn").textContent = cur === "dark" ? "☀️" : "🌙";
+  charts.forEach(c => c && restyle(c));
+};
+if (matchMedia("(prefers-color-scheme: light)").matches) {
+  document.documentElement.setAttribute("data-theme", "light");
+  $("themeBtn").textContent = "☀️";
+}
+$("notionLink").href = CFG.notionDbUrl || "#";
+
+/* ══════════════ 2. 데이터 로드 ══════════════ */
+const DEMO = [
+  { title:"중학 수학 랜덤 문제집 #001", date:"2026-06-02", topic:"수와 연산",   difficulty:"하", score:72 },
+  { title:"중학 수학 랜덤 문제집 #002", date:"2026-06-09", topic:"문자와 식",   difficulty:"중", score:65 },
+  { title:"중학 수학 랜덤 문제집 #003", date:"2026-06-16", topic:"방정식",      difficulty:"중", score:78 },
+  { title:"중학 수학 랜덤 문제집 #004", date:"2026-06-23", topic:"함수",        difficulty:"상", score:58 },
+  { title:"중학 수학 랜덤 문제집 #005", date:"2026-06-30", topic:"수와 연산",   difficulty:"하", score:88 },
+  { title:"중학 수학 랜덤 문제집 #006", date:"2026-07-07", topic:"기하",        difficulty:"중", score:81 },
+  { title:"중학 수학 랜덤 문제집 #007", date:"2026-07-14", topic:"함수",        difficulty:"상", score:69 },
+  { title:"중학 수학 랜덤 문제집 #008", date:"2026-07-21", topic:"확률과 통계", difficulty:"중", score:84 },
+  { title:"중학 수학 랜덤 문제집 #009", date:"2026-07-28", topic:"방정식",      difficulty:"상", score:76 },
+  { title:"중학 수학 랜덤 문제집 #010", date:"2026-08-04", topic:"기하",        difficulty:"중", score:92 },
+  { title:"중학 수학 랜덤 문제집 #011", date:"2026-08-11", topic:"확률과 통계", difficulty:"하", score:95 },
+  { title:"중학 수학 랜덤 문제집 #012", date:"2026-08-16", topic:"종합",        difficulty:"중", score:87 }
+].map(d => ({ ...d, notionUrl: CFG.notionDbUrl }));
+
+const tierOf = (s) => (CFG.tiers.find(t => s >= t.min) || CFG.tiers.at(-1)).key;
+
+async function load() {
+  const fb = CFG.firebase;
+  if (!fb || !fb.projectId) {
+    $("connDot").classList.add("off");
+    $("connText").textContent = "데모 데이터 — config.js 에 Firebase 설정을 넣으면 실제 기록이 표시됩니다";
+    $("brandSub").textContent = "데모 모드";
+    return DEMO;
+  }
+  try {
+    // Firebase SDK 는 설정이 있을 때만 불러옵니다 (데모 모드는 네트워크 없이 동작)
+    const [{ initializeApp }, { getFirestore, collection, getDocs, query, orderBy }] = await Promise.all([
+      import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"),
+      import("https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js")
+    ]);
+    const db = getFirestore(initializeApp(fb));
+    const snap = await getDocs(query(collection(db, "quizzes"), orderBy("dateTs", "asc")));
+    const rows = snap.docs.map(d => d.data()).filter(r => typeof r.score === "number");
+    if (!rows.length) throw new Error("빈 컬렉션");
+    $("connText").textContent = `Firebase 연결됨 · ${rows.length}건`;
+    $("brandSub").textContent = "실시간";
+    return rows;
+  } catch (err) {
+    console.warn("[dashboard] Firestore 로드 실패, 데모로 대체:", err);
+    $("connDot").classList.add("off");
+    $("connText").textContent = "Firebase 연결 실패 — 데모 데이터를 표시합니다 (콘솔 확인)";
+    return DEMO;
+  }
+}
+
+/* ══════════════ 3. 차트 ══════════════ */
+const charts = [];
+const chartInk   = () => ({ grid: cssVar("--grid"), muted: cssVar("--ink-muted"), surf: cssVar("--surface-1") });
+function baseOpts() {
+  const c = chartInk();
+  return {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: c.surf, titleColor: cssVar("--ink-1"), bodyColor: cssVar("--ink-2"),
+        borderColor: cssVar("--border"), borderWidth: 1, padding: 11, cornerRadius: 9,
+        displayColors: true, boxWidth: 9, boxHeight: 9, boxPadding: 4
+      }
+    },
+    scales: {
+      x: { grid: { display: false }, border: { color: cssVar("--axis") }, ticks: { color: c.muted, font: { size: 11 } } },
+      y: { beginAtZero: true, max: 100, grid: { color: c.grid, drawBorder: false },
+           border: { display: false }, ticks: { color: c.muted, font: { size: 11 }, stepSize: 25 } }
+    }
+  };
+}
+function restyle(ch) {
+  const o = baseOpts();
+  ch.options.scales.x.ticks.color = o.scales.x.ticks.color;
+  ch.options.scales.y.ticks.color = o.scales.y.ticks.color;
+  ch.options.scales.y.grid.color  = o.scales.y.grid.color;
+  ch.options.plugins.tooltip = o.plugins.tooltip;
+  ch.data.datasets.forEach(ds => { if (ds._role) ds.borderColor = ds.backgroundColor = cssVar(ds._role); });
+  ch.update("none");
+}
+
+/* 막대 끝에 값 직접 표시 (색만으로 읽지 않도록) */
+const valueLabels = {
+  id: "valueLabels",
+  afterDatasetsDraw(ch) {
+    const { ctx } = ch;
+    const horiz = ch.options.indexAxis === "y";
+    ctx.save();
+    ctx.fillStyle = cssVar("--ink-2");
+    ctx.font = "600 11px system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = horiz ? "left" : "center";
+    ch.getDatasetMeta(0).data.forEach((el, i) => {
+      const v = ch.data.datasets[0].data[i];
+      ctx.fillText(String(v), horiz ? el.x + 8 : el.x, horiz ? el.y : el.y - 11);
+    });
+    ctx.restore();
+  }
+};
+
+function buildTrend(rows) {
+  let sum = 0;
+  const avg = rows.map((r, i) => +(((sum += r.score) / (i + 1)).toFixed(1)));
+  const ch = new Chart($("cTrend"), {
+    type: "line",
+    data: {
+      labels: rows.map(r => r.date.slice(5)),
+      datasets: [
+        { label: "회차 점수", data: rows.map(r => r.score), _role: "--series-1",
+          borderColor: cssVar("--series-1"), backgroundColor: cssVar("--series-1"),
+          borderWidth: 2, tension: .32, pointRadius: 4, pointHoverRadius: 8,
+          pointBorderColor: cssVar("--surface-1"), pointBorderWidth: 2 },
+        { label: "누적 평균", data: avg, _role: "--series-2",
+          borderColor: cssVar("--series-2"), backgroundColor: cssVar("--series-2"),
+          borderWidth: 2, borderDash: [5, 4], tension: .32, pointRadius: 0, pointHoverRadius: 6 }
+      ]
+    },
+    options: baseOpts()
+  });
+  charts.push(ch);
+  $("tTrend").innerHTML = tableHTML(["날짜","문제집","주제","난이도","점수","누적평균"],
+    rows.map((r,i) => [r.date, r.title, r.topic, r.difficulty, r.score, avg[i]]));
+}
+
+function groupAvg(rows, key) {
+  const m = new Map();
+  rows.forEach(r => { const k = r[key] || "기타"; const a = m.get(k) || [0,0]; m.set(k, [a[0]+r.score, a[1]+1]); });
+  return [...m].map(([k,[s,n]]) => ({ k, avg: +(s/n).toFixed(1), n })).sort((a,b) => a.avg - b.avg);
+}
+
+function buildTopic(rows) {
+  const g = groupAvg(rows, "topic");
+  const o = baseOpts();
+  o.indexAxis = "y";
+  o.scales = {
+    x: { beginAtZero: true, max: 100, grid: { color: cssVar("--grid") }, border: { display: false },
+         ticks: { color: cssVar("--ink-muted"), font: { size: 11 } } },
+    y: { grid: { display: false }, border: { color: cssVar("--axis") },
+         ticks: { color: cssVar("--ink-2"), font: { size: 12 } } }
+  };
+  o.plugins.tooltip.callbacks = { label: (c) => ` 평균 ${c.raw}점 · ${g[c.dataIndex].n}회` };
+  o.layout = { padding: { right: 34 } };
+  const ch = new Chart($("cTopic"), {
+    type: "bar",
+    // 막대 길이가 크기를 나타내므로 색은 단일 계열로 (약한 주제는 위쪽에 정렬)
+    data: { labels: g.map(d => d.k), datasets: [{ data: g.map(d => d.avg), _role: "--series-1",
+      backgroundColor: cssVar("--series-1"),
+      borderRadius: 4, borderSkipped: "start", barThickness: 20 }] },
+    options: o,
+    plugins: [valueLabels]
+  });
+  charts.push(ch);
+  $("tTopic").innerHTML = tableHTML(["주제","평균","횟수"], g.map(d => [d.k, d.avg, d.n]));
+  return g;
+}
+
+function buildDiff(rows) {
+  const order = ["하","중","상"];
+  const g = groupAvg(rows, "difficulty").sort((a,b) => order.indexOf(a.k) - order.indexOf(b.k));
+  const o = baseOpts();
+  o.plugins.tooltip.callbacks = { label: (c) => ` 평균 ${c.raw}점 · ${g[c.dataIndex].n}회` };
+  const ch = new Chart($("cDiff"), {
+    type: "bar",
+    data: { labels: g.map(d => "난이도 " + d.k), datasets: [{ data: g.map(d => d.avg), _role: "--series-1",
+      backgroundColor: cssVar("--series-1"),
+      borderRadius: 4, borderSkipped: "bottom", barThickness: 42 }] },
+    options: o,
+    plugins: [valueLabels]
+  });
+  charts.push(ch);
+}
+
+function tableHTML(head, rows) {
+  return `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>` +
+    rows.map(r => `<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("") + `</tbody></table>`;
+}
+
+/* ══════════════ 4. 목록 · 필터 · 아이콘 ══════════════ */
+let ALL = [], view = "recent", tierFilter = null;
+
+function renderFilters() {
+  $("tierFilters").innerHTML =
+    `<button class="chip" data-tier="" aria-pressed="true">전체 <b id="cAll"></b></button>` +
+    CFG.tiers.map(t => `<button class="chip" data-tier="${t.key}" aria-pressed="false">
+       <i style="background:var(--tier-${t.key})"></i>${t.label}</button>`).join("");
+  $("tierFilters").onclick = (e) => {
+    const b = e.target.closest(".chip"); if (!b) return;
+    tierFilter = b.dataset.tier || null;
+    [...$("tierFilters").children].forEach(c => c.setAttribute("aria-pressed", c === b));
+    renderList();
+  };
+}
+
+function renderList() {
+  let rows = [...ALL];
+  if (tierFilter) rows = rows.filter(r => tierOf(r.score) === tierFilter);
+  if (view === "high")   rows.sort((a,b) => b.score - a.score);
+  if (view === "low")    rows.sort((a,b) => a.score - b.score);
+  if (view === "recent") rows.sort((a,b) => b.date.localeCompare(a.date));
+  if (view === "weak") {
+    const rank = new Map(groupAvg(ALL, "topic").map((d,i) => [d.k, i]));
+    rows.sort((a,b) => (rank.get(a.topic) ?? 99) - (rank.get(b.topic) ?? 99) || a.score - b.score);
+  }
+  $("quizList").innerHTML = rows.length ? rows.map(r => {
+    const t = tierOf(r.score);
+    return `<li>
+      <span class="bar" style="background:var(--tier-${t})"></span>
+      <span>
+        <span class="title"><a href="${r.notionUrl || CFG.notionDbUrl}" target="_blank" rel="noopener">${r.title}</a></span><br>
+        <span class="meta">${r.date} · ${r.topic} · 난이도 ${r.difficulty}</span>
+      </span>
+      <span class="score">
+        <b>${r.score}</b><span style="color:var(--ink-muted);font-size:.8rem">점</span><br>
+        <span class="badge"><i style="background:var(--tier-${t})"></i>${t}</span>
+      </span></li>`;
+  }).join("") : `<div class="empty">이 점수 구간에는 아직 기록이 없습니다.</div>`;
+}
+
+function wireIcons() {
+  const map = { btnHigh: "high", btnLow: "low", btnRecent: "recent", btnWeak: "weak" };
+  Object.entries(map).forEach(([id, v]) => {
+    $(id).onclick = () => {
+      view = v;
+      Object.keys(map).forEach(k => $(k).setAttribute("aria-pressed", k === id));
+      renderList();
+      document.getElementById("quizList").scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+  });
+}
+
+/* ══════════════ 5. 시작 ══════════════ */
+(async () => {
+  document.title = CFG.siteTitle || document.title;
+  const rows = await load();
+  ALL = rows;
+
+  const scores = rows.map(r => r.score);
+  const avg = scores.reduce((a,b) => a+b, 0) / scores.length;
+  const hi = rows.reduce((a,b) => b.score > a.score ? b : a);
+  const lo = rows.reduce((a,b) => b.score < a.score ? b : a);
+  const last3 = scores.slice(-3), prev3 = scores.slice(-6,-3);
+  const m = (x) => x.reduce((a,b)=>a+b,0) / (x.length || 1);
+  const delta = prev3.length ? m(last3) - m(prev3) : 0;
+
+  $("kAvg").textContent = avg.toFixed(1);
+  $("kAvgD").textContent = `${CFG.tiers.find(t=>avg>=t.min)?.key ?? "하"} 구간`;
+  $("kCnt").textContent = rows.length;
+  $("kCntD").textContent = `${rows[0].date} ~ ${rows.at(-1).date}`;
+  $("kMax").textContent = hi.score;
+  $("kMaxD").textContent = hi.title;
+  $("kTrd").innerHTML = `<span class="${delta>=0?'up':'down'}">${delta>=0?'▲':'▼'} ${Math.abs(delta).toFixed(1)}</span>`;
+  $("kTrdD").textContent = "최근 3회 vs 이전 3회 평균";
+
+  $("nHigh").textContent   = `${hi.score}점 · ${hi.topic}`;
+  $("nLow").textContent    = `${lo.score}점 · ${lo.topic}`;
+  $("nRecent").textContent = `${rows.at(-1).date}`;
+
+  buildTrend([...rows].sort((a,b) => a.date.localeCompare(b.date)));
+  const g = buildTopic(rows);
+  buildDiff(rows);
+  $("nWeak").textContent = `${g[0].k} · 평균 ${g[0].avg}`;
+
+  renderFilters(); wireIcons(); renderList();
+  document.getElementById("cAll").textContent = `(${rows.length})`;
+})();
+</script>
+</body>
+</html>
+

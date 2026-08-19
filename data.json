@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "source": "notion",
+  "summary": {
+    "totalCount": 1,
+    "overallAverage": 45,
+    "highest": {
+      "title": "중학 수학 문제집 #001 — 수와 연산",
+      "score": 45,
+      "date": "2026-08-18",
+      "topic": "수와 연산",
+      "notionUrl": "https://www.notion.so/3c0a79df73cf80e98a17df2424d6eb34"
+    },
+    "lowest": {
+      "title": "중학 수학 문제집 #001 — 수와 연산",
+      "score": 45,
+      "date": "2026-08-18",
+      "topic": "수와 연산",
+      "notionUrl": "https://www.notion.so/3c0a79df73cf80e98a17df2424d6eb34"
+    },
+    "byTopic": {
+      "수와 연산": 45
+    },
+    "byDifficulty": {
+      "하": 45
+    },
+    "updatedAt": "2026-08-19T05:00:00.000Z"
+  },
+  "rows": [
+    {
+      "notionId": "3c0a79df-73cf-80e9-8a17-df2424d6eb34",
+      "title": "중학 수학 문제집 #001 — 수와 연산",
+      "date": "2026-08-18",
+      "dateTs": 1787011200000,
+      "topic": "수와 연산",
+      "difficulty": "하",
+      "grade": "중1",
+      "score": 45,
+      "maxScore": 100,
+      "notionUrl": "https://www.notion.so/3c0a79df73cf80e98a17df2424d6eb34",
+      "status": "완료",
+      "itemCount": 20,
+      "average": 45,
+      "tier": "하"
+    }
+  ]
+}
